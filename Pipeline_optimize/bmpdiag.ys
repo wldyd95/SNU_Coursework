@@ -1,0 +1,272 @@
+
+#------------------------------------------------------------------
+# 
+#  4190.308 Computer Architecture (Spring 2019)
+#
+#  Project #4: Optimizing Program for a Pipelined Y86-64 Processor
+#
+#  May 28, 2019
+#
+#  Jin-Soo Kim (jinsoo.kim@snu.ac.kr)
+#  Systems Software & Architecture Laboratory
+#  Dept. of Computer Science and Engineering
+#  Seoul National University
+#
+#------------------------------------------------------------------
+bmp_diag:
+	# imgptr is in %rdi
+	# width  is in %rsi
+	# height is in %rdx
+	# gap 	 is in %rcx
+	#-----------------------------------------------------------------
+	
+	# Example: Initially, the %rdi register points to the first 
+	# pixel in the last row of the image.  The following three 
+	# instructions change its color to red.
+
+	# movb 	$0x00, (%rdi)			# blue
+	# movb	$0x00, 1(%rdi)			# green
+	# movb	$0xff, 2(%rdi)			# red
+
+	# FILL HERE
+	# You are allowed to use any register supported by Y86-64 architecture
+
+	irmovq $3, %rbx # store number 3
+
+	# multiply 3 to gap for pointer move
+	mulq %rbx, %rcx
+	
+	# multiply 3 to original width for pointer move
+	mulq %rbx, %rsi
+
+	# padding process
+	padding:
+		# r8 is used for fixed width (considering padding)
+		irmovq $4, %r9 # r9 is used for 4
+		rrmovq %rsi, %r8 # r8 = 3 * rsi 
+		pushq %rax
+		pushq %rbp
+		iaddq $3, %r8 
+		irmovq $0x00, %r13
+		irmovq $0xff, %r14
+		divq %r9, %r8 # r8 = (3 * rsi + 3) / 4
+		mulq %r9, %r8 # r8 = 4 * (3 * rsi + 3) / 4
+
+		rrmovq %rdx, %r9 
+		iaddq $-1, %r9
+		mulq %r8 ,%r9 
+
+	# should move pointer 
+	initial:
+	addq %r9, %rdi # move pointer up
+
+	start:
+		rrmovq %rsi, %r12
+		iaddq $-1, %r12
+		divq %rcx, %r12 # used for gap number for each line
+
+		rrmovq %rcx, %rbp
+		rrmovq %rdi, %r11 # used for base imgptr for each horizontal line
+		irmovq $0, %r10 # used for offset value
+		subq %r10, %rbp
+
+		# %r12 even or odd? if odd, we must move to draw_odd case
+		irmovq $2, %r9
+		rrmovq %r12, %rax
+		divq %r9, %rax
+		mulq %r9, %rax
+		rrmovq %rdx, %r9 # used for vertical index	
+		subq %r12, %rax 
+		jne draw_odd 	# if rax is odd, jmp to draw_odd
+
+	draw_even:
+		rrmovq %r12, %rbx # rbx used for r12
+		addq %r11, %rbp # left line pointer
+		
+		loop_even:
+		# loop unrolling
+		rmmovb %r13, (%rdi)
+		rmmovb %r13, 1(%rdi)
+		rmmovb %r14, 2(%rdi)
+		
+		addq %rcx, %rdi
+		rmmovb %r13, (%rbp)
+		rmmovb %r13, 1(%rbp)
+		rmmovb %r14, 2(%rbp)
+		
+		addq %rcx, %rbp
+		rmmovb %r13, (%rdi)
+		rmmovb %r13, 1(%rdi)
+		rmmovb %r14, 2(%rdi)
+		
+		rmmovb %r13, (%rbp)
+		rmmovb %r13, 1(%rbp)
+		rmmovb %r14, 2(%rbp)
+		
+		addq %rcx, %rdi
+		addq %rcx, %rbp
+
+		iaddq $-2, %rbx
+		jg loop_even
+
+		# last loop (near boundary)
+		last_loop_even:
+		# boundary test
+		L_l_even:
+		rrmovq %r11, %rbx
+		rrmovq %r11, %rax
+
+		iaddq $3, %r10 # increase offset
+		subq %r8, %r11 # update base pointer
+
+		addq %rsi, %rbx
+		addq %rsi, %rax
+
+		iaddq $-1, %r9 # decrease vertical index
+
+		subq %rbp, %rbx
+		jle L_r_even
+		
+		rmmovb %r13, (%rbp)
+		rmmovb %r13, 1(%rbp)
+		rmmovb %r14, 2(%rbp)
+
+		L_r_even:
+		subq %rdi ,%rax
+		rrmovq %rcx, %rbp
+		jle loop_end_even
+
+		rmmovb %r13, (%rdi)
+		rmmovb %r13, 1(%rdi)
+		rmmovb %r14, 2(%rdi)
+
+		loop_end_even:
+		# "#" instructions are forwarded to last_loop
+		# rrmovq %rcx, %rbp
+		# iaddq $3, %r10 # increase offset
+		# subq %r8, %r11 # update base pointer
+		# iaddq $-1, %r9 # decrease vertical index
+
+		# compare offset with gap
+		subq %r10, %rbp
+		rrmovq %rcx, %rbp
+		cmovle %r13, %r10
+		
+		# calculate next pointer
+		rrmovq %r11, %rdi
+		rrmovq %r9, %rbx
+		subq %r10, %rbp
+
+		# out of hegith? test
+		addq %r10, %rdi # start from offset
+		iaddq $-1, %rbx # compare with 1
+		jge draw_even
+		
+		end_even:
+		popq %rbp
+		popq %rax
+		ret
+	
+	draw_odd:
+		rrmovq %r12, %rbx # rbx used for r12
+		addq %r11, %rbp # left line pointer
+
+		# in odd case, move once more in advance
+		rmmovb %r13, (%rdi)
+		rmmovb %r13, 1(%rdi)
+		rmmovb %r14, 2(%rdi)
+		
+		rmmovb %r13, (%rbp)
+		rmmovb %r13, 1(%rbp)
+		rmmovb %r14, 2(%rbp)
+		
+		addq %rcx, %rdi
+		addq %rcx, %rbp
+		
+		iaddq $-1, %rbx
+
+		loop_odd:
+		# loop unrolling
+		rmmovb %r13, (%rdi)
+		rmmovb %r13, 1(%rdi)
+		rmmovb %r14, 2(%rdi)
+		
+		addq %rcx, %rdi
+		rmmovb %r13, (%rbp)
+		rmmovb %r13, 1(%rbp)
+		rmmovb %r14, 2(%rbp)
+		
+		addq %rcx, %rbp
+		rmmovb %r13, (%rdi)
+		rmmovb %r13, 1(%rdi)
+		rmmovb %r14, 2(%rdi)
+		
+		rmmovb %r13, (%rbp)
+		rmmovb %r13, 1(%rbp)
+		rmmovb %r14, 2(%rbp)
+		
+		addq %rcx, %rdi
+		addq %rcx, %rbp
+
+		iaddq $-2, %rbx
+		jg loop_odd
+
+		# last loop (near boundary)
+		last_loop_odd:
+		# boundary test
+		L_l_odd:
+		rrmovq %r11, %rbx
+		rrmovq %r11, %rax
+
+		iaddq $3, %r10 # increase offset
+		subq %r8, %r11 # update base pointer
+
+		addq %rsi, %rbx
+		addq %rsi, %rax
+
+		iaddq $-1, %r9 # decrease vertical index
+
+		subq %rbp, %rbx
+		jle L_r_odd
+		
+		rmmovb %r13, (%rbp)
+		rmmovb %r13, 1(%rbp)
+		rmmovb %r14, 2(%rbp)
+
+		L_r_odd:
+		subq %rdi ,%rax
+		rrmovq %rcx, %rbp
+		jle loop_end_odd
+
+		rmmovb %r13, (%rdi)
+		rmmovb %r13, 1(%rdi)
+		rmmovb %r14, 2(%rdi)
+
+		loop_end_odd:
+		# "#" instructions are forwarded to last_loop
+
+		# rrmovq %rcx, %rbp
+		# iaddq $3, %r10 # increase offset
+		# subq %r8, %r11 # update base pointer
+		# iaddq $-1, %r9 # decrease vertical index
+
+		# compare offset with gap
+		subq %r10, %rbp
+		rrmovq %rcx, %rbp
+		cmovle %r13, %r10
+		
+		# calculate next pointer
+		rrmovq %r11, %rdi
+		rrmovq %r9, %rbx
+		subq %r10, %rbp
+
+		# out of hegith? test
+		addq %r10, %rdi # start from offset
+		iaddq $-1, %rbx # compare with 1
+		jge draw_odd
+		
+		end:
+		popq %rbp
+		popq %rax
+	#-----------------------------------------------------------------
+	ret
